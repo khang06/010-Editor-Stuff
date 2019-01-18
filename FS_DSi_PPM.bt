@@ -1,0 +1,118 @@
+//------------------------------------------------
+//--- 010 Editor v9.0.1 Binary Template
+//
+//      File: FS_DSi_PPM.bt
+//   Authors: Khangaroo
+//   Version: 0.1
+//   Purpose: Flipnote Studio DSi PPM parsing
+//  Category: Game
+// File Mask: *.ppm
+//  ID Bytes: 50 41 52 41 // PARA
+//   History: 
+//   0.1 1-18-2019 Initial release
+//------------------------------------------------
+
+typedef struct {
+    char magic[4];
+    uint32 animation_data_size <format=hex>;
+    uint32 sound_data_size <format=hex>;
+    uint16 frame_count;
+    uint16 unk1 <format=hex>;
+    uint16 locked;
+    uint16 thumbnail_frame_index;
+    wchar_t root_author_name[11];
+    wchar_t parent_author_name[11];
+    wchar_t current_author_name[11];
+    uchar parent_author_id[8] <format=hex>;
+    uchar current_author_id[8] <format=hex>;
+    uchar parent_filename[18];
+    uchar current_filename[18];
+    uchar root_author_id[8] <format=hex>;
+    uchar partial_filename[8];
+    uint32 timestamp <read=ppm_timestamp_to_string, write=string_to_ppm_timestamp>;
+    uint16 unk2 <format=hex>;
+} fsdsi_ppm_header;
+
+typedef struct {
+    uint16 frame_offset_table_size <format=hex>;
+    uint16 unk1 <format=hex>;
+    uint32 flags <format=binary>; // TODO: figure out how to parse individual bits
+} fsdsi_animation_header;
+
+typedef struct {
+    uint32 bgm_size;
+    uint32 se1_size;
+    uint32 se2_size;
+    uint32 se3_size;
+    uchar frame_speed <read=frame_speed_to_string>;
+    uchar bgm_frame_speed <read=frame_speed_to_string>;
+    uchar padding[14];
+} fsdsi_sound_header;
+
+struct {
+    fsdsi_ppm_header header;
+    uchar thumbnail[0x600]; // TODO: maybe add some parsing to this
+    fsdsi_animation_header animation_header;
+    uint32 frame_offset_table[animation_header.frame_offset_table_size / 4] <format=hex>;
+    uchar animation_data[header.animation_data_size - 8 - animation_header.frame_offset_table_size]; // TODO: add parsing once i figure out bits
+    uchar sound_effect_usage[header.frame_count]; // the offset of this is 0x6A0 + animation_data_size, so i had to cut animation_data short
+    local uint64 offset = 0x6A0 + header.animation_data_size + header.frame_count;
+    if (offset % 4 != 0) // method shamelessly stolen from https://github.com/jaames/flipnote.js/blob/master/src/parser/ppm.js
+        uchar align[4 - (offset % 4)];
+    fsdsi_sound_header sound_header;
+    uchar bgm_data[sound_header.bgm_size];
+    uchar se1_data[sound_header.se1_size];
+    uchar se2_data[sound_header.se2_size];
+    uchar se3_data[sound_header.se3_size];
+    uchar signature[0x80];
+    uchar padding[0x10];
+} fsdsi_ppm;
+
+string ppm_timestamp_to_string(uint32 ppm_timestamp) {
+    // convert to unix time first (time64_t to avoid overflows)
+    // fs dsi timestamps start at january 1, 2000 instead of january 1, 1970
+    time64_t unix_timestamp = ppm_timestamp + 946684800;
+    return Time64TToString(unix_timestamp);
+}
+
+void string_to_ppm_timestamp(uint32 &ppm_timestamp, string input) {
+    // see above
+    time64_t unix_timestamp = 0;
+    StringToTime64T(input, unix_timestamp);
+    ppm_timestamp = (uint32)unix_timestamp - 946684800;
+}
+
+string frame_speed_to_string(uchar frame_speed) {
+    string out;
+    string framerate;
+    switch (frame_speed) {
+        case 1:
+            framerate = "0.5";
+            break;
+        case 2:
+            framerate = "1";
+            break;
+        case 3:
+            framerate = "2";
+            break;
+        case 4:
+            framerate = "4";
+            break;
+        case 5:
+            framerate = "6";
+            break;
+        case 6:
+            framerate = "12";
+            break;
+        case 7:
+            framerate = "20";
+            break;
+        case 8:
+            framerate = "30";
+            break;
+        default:
+            framerate = "Unknown";
+    }
+    SPrintf(out, "%x (%s FPS)", frame_speed, framerate);
+    return out;
+}
